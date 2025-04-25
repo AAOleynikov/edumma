@@ -268,6 +268,27 @@ class PlateTemperatureSolver {
                         node.t = A[B.get_or_add(node.j * mesh.nCols + node.i)][N];
                     }
                 }
+
+                /*альтернативный решатель СЛАУ (быстрее)*/
+                /*
+                Eigen::MatrixXd eigenA(N, N);
+                Eigen::VectorXd eigenC(N);
+                for (int i = 0; i < N; ++i) {
+                    for (int j = 0; j < N; ++j) {
+                        eigenA(i, j) = A[i][j];
+                    }
+                    eigenC(i) = A[i][N];
+                }
+
+                Eigen::VectorXd solution = eigenA.partialPivLu().solve(eigenC);
+
+                for (auto& node : mesh.nodes) {
+                    if (node.bc.type != 1) {
+                        node.t = solution(B.get_or_add(node.j * mesh.nCols + node.i));
+                    }
+                }
+                */
+
             }
             return 0;
         }
