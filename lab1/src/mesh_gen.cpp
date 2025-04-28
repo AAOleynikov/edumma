@@ -13,8 +13,8 @@ struct Node {
     double x, y;    // координаты узла в пространстве
     // 0 - начальные условия, T(t=0) = val
     // 1 - Dirichlet,         T      = val
-    // 2 - Neumann,           dT/dn  = val
-    // 3 - Robin,             dT/dn  = val * T
+    // 2 - Neumann,           dT/dn  = val/lambda
+    // 3 - Robin,             dT/dn  = -sigma/lambda(T - val)
     int bc_type;  
     double bc_val;
     int n_i, n_j;   // определяет "узел нормали" при наличии такового 
@@ -79,7 +79,7 @@ public:
                     node.x = x;
                     node.y = y;
                     node.bc_type = 3;
-                    node.bc_val = 1;
+                    node.bc_val = 0.;
                     switch (norm){
                         case 1:
                             node.n_i = i - 1;
@@ -168,8 +168,13 @@ public:
         std::ofstream fout("mesh_nodes.csv");
         fout << std::setprecision(8);
         // Метаданные: максимальные индексы и шаги
-        fout << "# метаданные: nRows, nCols, dx, dy" << std::endl;
-        fout << Nx + 1 << ", " << Ny + 1 << ", " << dx << ", " << dy << std::endl;
+        const double lambda = 1.;
+        const double rho = 1.;
+        const double c = 1.;           
+        const double sigma = -1.; 
+
+        fout << "# метаданные: nRows, nCols, dx, dy, lambda, rho, c, sigma" << std::endl;
+        fout << Nx + 1 << ", " << Ny + 1 << ", " << dx << ", " << dy << "," << lambda << "," << rho << "," << c << "," << sigma << std::endl;
 
         fout << "# узел: i, j, x, y, bc_type, bc_val, n_i, n_j" << std::endl;
         // Данные узлов: i, j, x, y, bc_type, bc_val
@@ -198,7 +203,7 @@ private:
 
 int main() {
     double Lx = 4.0, Ly = 4.0; // длина и ширина пластины
-    int Nx = 40, Ny = 40; // число узлов КЭ по ширине и высоте
+    int Nx = 40, Ny = 40; // число элементов КЭ по ширине и высоте
 
     MeshGenerator meshGen(Lx, Ly, Nx, Ny);
     meshGen.generateMesh();

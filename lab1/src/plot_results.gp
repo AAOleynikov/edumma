@@ -1,5 +1,5 @@
-set terminal pngcairo size 800,600 enhanced font "Verdana,10"
-set output "temperature.png"
+set terminal pngcairo size 1600,1200 enhanced font "Verdana,25"
+set output "temperature1.png"
 
 # Получение статистики по температуре (столбец 3)
 stats 'build/data.txt' using 3 nooutput

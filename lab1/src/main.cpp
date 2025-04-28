@@ -8,58 +8,8 @@
 #include <stack>
 #include <iomanip>
 #include <unordered_map>
-#include </usr/include/eigen3/Eigen/Dense>
 
-void print_augmented_matrix(const std::vector<std::vector<double>>& A, 
-    int max_show = 22, 
-    int precision = 3) {
-const int rows = A.size();
-if(rows == 0) {
-std::cout << "Empty matrix!\n";
-return;
-}
-const int cols = A[0].size();
-const int shown_cols = std::min(cols, max_show + 1); // +1 для RHS
-
-// Заголовок
-std::cout << "\n\033[1;36m" << std::setw(12) << "Equation │";
-for(int j = 0; j < shown_cols - 1; ++j) {
-std::cout << std::setw(10) << "a" + std::to_string(j);
-}
-std::cout << std::setw(12) << "│ RHS";
-std::cout << "\n\033[0m";
-
-// Вывод данных
-for(int i = 0; i < std::min(rows, max_show); ++i) {
-// Номер строки
-std::cout << std::setw(10) << i << " │";
-
-// Коэффициенты
-for(int j = 0; j < shown_cols; ++j) {
-if(j == cols - 1) std::cout << " │"; // Разделитель для RHS
-
-if(fabs(A[i][j]) < 1e-12) {
-std::cout << std::setw(10) << "·";
-} else {
-std::cout << std::fixed << std::setprecision(precision) 
-  << std::setw(10) << A[i][j];
-}
-}
-
-// Многоточие для больших матриц
-if(cols > shown_cols) std::cout << " ...";
-std::cout << "\n";
-}
-
-// Футер
-if(rows > max_show || cols > shown_cols) {
-std::cout << "\n\033[3mShowing first " << max_show 
-<< " rows/columns. Total size: " 
-<< rows << "x" << cols << "\033[0m\n";
-}
-}
-
-
+// Вспомогательный тип данных для хранения вектора B СЛАУ
 template<typename T>
 class OrderIndexMap {
 public:
@@ -89,11 +39,11 @@ private:
     int current_index = 0;
 };
 
-// Граничные условия:
+// Краевые условия:
 // type 0 - начальные условия, T(t=0) = val
-// type 1 - Dirichlet,         T      = val
-// type 2 - Neumann,           dT/dn  = val
-// type 3 - Robin,             dT/dn  = val * T
+// 1 - Dirichlet,         T      = val
+// 2 - Neumann,           dT/dn  = val/lambda
+// 3 - Robin,             dT/dn  = -sigma/lambda(T - val)
 class BoundaryCondition {
     public:
         int type;     
@@ -112,11 +62,13 @@ class Node {
         Node(int _i, int _j, double _x, double _y, int _bc_type, double _bc_val, int _t = 0., int _n_i = 0, int _n_j = 0) : i(_i), j(_j), x(_x), y(_y), bc(_bc_type, _bc_val, _n_i, _n_j), t(_t) {}
     };
 
+// Класс сетки (также содержит данные о характеристиках)
 class PlateMeshGrid {
     public:
     std::vector<Node> nodes;
     int nRows, nCols;   // nRows - число строк (индекс i), nCols - число столбцов (индекс j)
     double dx, dy;
+    double lambda, rho, c, sigma;
        
     // Чтение сетки из CSV файла
     int read_mesh_from_csv(const std::string& filename) {
@@ -134,7 +86,11 @@ class PlateMeshGrid {
             ss >> this->nCols >> delim
                >> this->nRows >> delim
                >> this->dx >> delim
-               >> this->dy >> delim;
+               >> this->dy >> delim
+               >> this->lambda >> delim
+               >> this->rho >> delim
+               >> this->c >> delim
+               >> this->sigma;
             break; //метаданные о сетке прочитаны
         }
 
@@ -158,21 +114,12 @@ class PlateMeshGrid {
                ss >> delim >> n_i >> delim
                   >> n_j;
                nodes.emplace_back(i, j, x, y, bc_type, bc_val, 0., n_i, n_j);
-               //std::cout << i << "," << j << "," << x << "," << y << "," << bc_type << "," << bc_val << "," << std::endl;
             }
             else{
                nodes.emplace_back(i, j, x, y, bc_type, bc_val, bc_val);
             }
-            // std::cout << i << "," << j << std::endl;
         }
         fin.close();
-/*
-        for (auto& node : nodes) {
-            int i = node.i;
-            int j = node.j;
-            std::cout << i << "," << j << std::endl;
-        }
-  */ 
         return 0;
     }
  
@@ -191,17 +138,20 @@ class PlateMeshGrid {
     }
 };
 
+// Класс решателя
 class PlateTemperatureSolver {
     public:
-        int solve_mesh(PlateMeshGrid& mesh, double time_final) {
-            const double alpha = 1;                    // Коэффициент теплопроводности
-            const int N = mesh.nodes.size();             // Число уравнений в СЛАУ будет соответсвтовать числу узлов, в которых не граничное условие 1 рода
-            const double dt = 0.1;                         // Шаг по времени
-            int timesteps = (int) time_final / dt;       // Инициализация начального момента времени
-            //int timesteps = 1;
+        int solve_mesh(PlateMeshGrid& mesh, const double time_final, const double dt) {
+            const double lambda = mesh.lambda;
+            const double rho = mesh.rho;
+            const double c = mesh.c;            
+            const double sigma = mesh.sigma; 
+            const double alpha = lambda / rho / c;
+           
+            const int N = mesh.nodes.size();             
+            int timesteps = (int) time_final / dt;       
             const int nodes_count = mesh.nodes.size();
 
-            // A B = C, B = A^-1 C
             std::vector<std::vector<double>> A(N, std::vector<double>(N+1));
             OrderIndexMap<int> B(N); 
             for (auto& node : mesh.nodes) {
@@ -213,7 +163,6 @@ class PlateTemperatureSolver {
 
                 for (int n = 0; n < nodes_count; n++) { // составляем СЛАУ
                     Node node = mesh.nodes[n];
-                    
                     
                     int b_poz_i_j, b_poz_im_j, b_poz_ip_j, b_poz_i_jm, b_poz_i_jp, b_poz, b_poz_n;
                     switch (node.bc.type) { // см описание класса
@@ -244,18 +193,20 @@ class PlateTemperatureSolver {
                         case 2:
                             b_poz = B.get_or_add(node.j * mesh.nCols + node.i);
                             b_poz_n = B.get_or_add(node.bc.n_j * mesh.nCols + node.bc.n_i);
-                            A[n][b_poz] = -1.;
                             A[n][b_poz_n] = 1.;
+                            A[n][b_poz] = -1.;
                             A[n][N] = node.bc.val * sqrt((mesh.dx*mesh.dx*(node.bc.n_i-node.i)*(node.bc.n_i-node.i) \
-                                        + mesh.dy*mesh.dy*(node.bc.n_j-node.j)*(node.bc.n_j-node.j)));
+                                        + mesh.dy*mesh.dy*(node.bc.n_j-node.j)*(node.bc.n_j-node.j))) / lambda;
                             break;
                         case 3:
                             b_poz = B.get_or_add(node.j * mesh.nCols + node.i);
                             b_poz_n = B.get_or_add(node.bc.n_j * mesh.nCols + node.bc.n_i);
-                            A[n][b_poz] = -(node.bc.val * sqrt((mesh.dx*mesh.dx*(node.bc.n_i-node.i)*(node.bc.n_i-node.i) \
-                                                                + mesh.dy*mesh.dy*(node.bc.n_j-node.j)*(node.bc.n_j-node.j))) + 1);
+                            A[n][b_poz] = (sqrt((mesh.dx*mesh.dx*(node.bc.n_i-node.i)*(node.bc.n_i-node.i) \
+                                                                + mesh.dy*mesh.dy*(node.bc.n_j-node.j)*(node.bc.n_j-node.j))) * sigma / lambda - 1.);
+
                             A[n][b_poz_n] = 1.;
-                            A[n][N] = 0.;
+                            A[n][N] = sqrt((mesh.dx*mesh.dx*(node.bc.n_i-node.i)*(node.bc.n_i-node.i) \
+                            + mesh.dy*mesh.dy*(node.bc.n_j-node.j)*(node.bc.n_j-node.j))) * node.bc.val * sigma / lambda;
                             break;
                     }
                 }
@@ -268,27 +219,6 @@ class PlateTemperatureSolver {
                         node.t = A[B.get_or_add(node.j * mesh.nCols + node.i)][N];
                     }
                 }
-
-                /*альтернативный решатель СЛАУ (быстрее)*/
-                /*
-                Eigen::MatrixXd eigenA(N, N);
-                Eigen::VectorXd eigenC(N);
-                for (int i = 0; i < N; ++i) {
-                    for (int j = 0; j < N; ++j) {
-                        eigenA(i, j) = A[i][j];
-                    }
-                    eigenC(i) = A[i][N];
-                }
-
-                Eigen::VectorXd solution = eigenA.partialPivLu().solve(eigenC);
-
-                for (auto& node : mesh.nodes) {
-                    if (node.bc.type != 1) {
-                        node.t = solution(B.get_or_add(node.j * mesh.nCols + node.i));
-                    }
-                }
-                */
-
             }
             return 0;
         }
@@ -386,6 +316,7 @@ class PlateTemperatureSolver {
 // Определяет параметры моделирования, задаваемые пользователем
 struct ModelParameters {
     double duration;         // Продолжительность моделирования
+    double dt;               // Шаг по времени
     bool service_mode;       // Флаг служебного режима без файлового вывода (для benchmark)
     std::string output_file; // Название файла для вывода результатов моделирования
     std::string mesh_file;   // Название файла-источника сетки для моделирования
@@ -399,6 +330,7 @@ class ParameterParser {
     // выбрасывает std::invalid_argument при некорректных значениях параметров.
     ModelParameters getParameters() const {
       // Значения по умолчанию.
+      double dt = 1.;
       double duration = 25.;
       std::string output_file = "data.txt";
       bool service_mode = false;
@@ -406,7 +338,7 @@ class ParameterParser {
 
       // Разбор аргументов при помощи getopt.
       int option = 0;
-      while ((option = getopt(_argument_count, _argument_strings, "i:o:t:s")) != -1) {
+      while ((option = getopt(_argument_count, _argument_strings, "i:o:t:d:s")) != -1) {
         switch (option) {
         case 't':
           duration = atof(optarg);
@@ -414,6 +346,12 @@ class ParameterParser {
             throw std::invalid_argument("ModelParameters: duration must be positive");
           }
           break;
+        case 'd':
+            dt = atof(optarg);
+            if (dt <= 0.) {
+                throw std::invalid_argument("ModelParameters: dt must be positive");
+              }
+            break;
         case 'o':
           output_file = optarg;
           break;
@@ -454,11 +392,84 @@ int main(int argc, char** argv) {
         mesh.read_mesh_from_csv(params.mesh_file);
 
         PlateTemperatureSolver solver;
-        solver.solve_mesh(mesh, 25);
+        solver.solve_mesh(mesh, params.duration, params.dt);
         mesh.print_mesh(params.output_file);
     } catch (...) {
         return 1;
     }
-    std::cout << "Simulation completed successfully.\n";
+    std::cout << "Симуляция проведена успешно\n";
     return 0;
 }
+
+// #include </usr/include/eigen3/Eigen/Dense>
+/*альтернативный решатель СЛАУ*/
+                /*
+                Eigen::MatrixXd eigenA(N, N);
+                Eigen::VectorXd eigenC(N);
+                for (int i = 0; i < N; ++i) {
+                    for (int j = 0; j < N; ++j) {
+                        eigenA(i, j) = A[i][j];
+                    }
+                    eigenC(i) = A[i][N];
+                }
+
+                Eigen::VectorXd solution = eigenA.partialPivLu().solve(eigenC);
+
+                for (auto& node : mesh.nodes) {
+                    if (node.bc.type != 1) {
+                        node.t = solution(B.get_or_add(node.j * mesh.nCols + node.i));
+                    }
+                }
+                */
+
+
+/*
+void print_augmented_matrix(const std::vector<std::vector<double>>& A, 
+    int max_show = 22, 
+    int precision = 3) {
+const int rows = A.size();
+if(rows == 0) {
+std::cout << "Empty matrix!\n";
+return;
+}
+const int cols = A[0].size();
+const int shown_cols = std::min(cols, max_show + 1); // +1 для RHS
+
+// Заголовок
+std::cout << "\n\033[1;36m" << std::setw(12) << "Equation │";
+for(int j = 0; j < shown_cols - 1; ++j) {
+std::cout << std::setw(10) << "a" + std::to_string(j);
+}
+std::cout << std::setw(12) << "│ RHS";
+std::cout << "\n\033[0m";
+
+// Вывод данных
+for(int i = 0; i < std::min(rows, max_show); ++i) {
+// Номер строки
+std::cout << std::setw(10) << i << " │";
+
+// Коэффициенты
+for(int j = 0; j < shown_cols; ++j) {
+if(j == cols - 1) std::cout << " │"; // Разделитель для RHS
+
+if(fabs(A[i][j]) < 1e-12) {
+std::cout << std::setw(10) << "·";
+} else {
+std::cout << std::fixed << std::setprecision(precision) 
+  << std::setw(10) << A[i][j];
+}
+}
+
+// Многоточие для больших матриц
+if(cols > shown_cols) std::cout << " ...";
+std::cout << "\n";
+}
+
+// Футер
+if(rows > max_show || cols > shown_cols) {
+std::cout << "\n\033[3mShowing first " << max_show 
+<< " rows/columns. Total size: " 
+<< rows << "x" << cols << "\033[0m\n";
+}
+}
+*/
