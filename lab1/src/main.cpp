@@ -149,7 +149,7 @@ class PlateTemperatureSolver {
             const double alpha = lambda / rho / c;
            
             const int N = mesh.nodes.size();             
-            int timesteps = (int) time_final / dt;       
+            int timesteps = (int) time_final / dt;    
             const int nodes_count = mesh.nodes.size();
 
             std::vector<std::vector<double>> A(N, std::vector<double>(N+1));
@@ -375,6 +375,7 @@ class ParameterParser {
       parameters.mesh_file = mesh_file;
       parameters.duration  = duration;
       parameters.service_mode = service_mode;
+      parameters.dt = dt;
 
       return parameters;
     }

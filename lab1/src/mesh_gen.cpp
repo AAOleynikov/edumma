@@ -71,9 +71,9 @@ public:
                 double x = i * dx;
                 double y = j * dy;
 
+                Node node;
                 // Если точка находится на границе треугольника, назначаем условие Robin: dT/dn = 1 * T
                 if (int norm = onTriangleEdge(x, y)) {
-                    Node node;
                     node.i = i;
                     node.j = j;
                     node.x = x;
@@ -98,10 +98,18 @@ public:
                     }
 
                     nodes.push_back(node);
-                } else
+
+                /*} else if (x - 3 < dx*0.5 && x > 3-dx*0.5 && y-3 < dy*0.5 &&  y > 3-dy*0.5) {
+                    node.bc_type = 1;
+                    node.bc_val = 0.1;
+                    node.i = i;
+                    node.j = j;
+                    node.x = x;
+                    node.y = y;
+                    nodes.push_back(node); 
+                }*/
                 // Если вне треугольника и не на границах
-                if (!insideTriangle(x, y) && (i!=0 && i!=Ny) && (j!=0 && j!=Nx)) {
-                    Node node;
+                else if (!insideTriangle(x, y) && (i!=0 && i!=Ny) && (j!=0 && j!=Nx)) {
                     node.i = i;
                     node.j = j;
                     node.x = x;
@@ -114,7 +122,6 @@ public:
             
                 // граничные условия второго рода
                 else if (j == 0 && i!=0 && i!=Nx) {
-                    Node node;
                     node.i = i;
                     node.j = j;
                     node.x = x;
@@ -127,7 +134,6 @@ public:
                 }
                 // граничные условия первого рода
                 else if (i == 0 && j!=0 && j!=Ny) {
-                    Node node;
                     node.i = i;
                     node.j = j;
                     node.x = x;
@@ -137,7 +143,6 @@ public:
                     nodes.push_back(node);                    
                 }
                 else if (i == Nx && j!=0 && j!=Ny) {
-                    Node node;
                     node.i = i;
                     node.j = j;
                     node.x = x;
@@ -147,7 +152,6 @@ public:
                     nodes.push_back(node);                    
                 }
                 else if (j == Ny && i!=0 && i!=Nx) {
-                    Node node;
                     node.i = i;
                     node.j = j;
                     node.x = x;
