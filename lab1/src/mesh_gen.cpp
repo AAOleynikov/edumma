@@ -99,7 +99,7 @@ public:
 
                     nodes.push_back(node);
 
-                /*} else if (x - 3 < dx*0.5 && x > 3-dx*0.5 && y-3 < dy*0.5 &&  y > 3-dy*0.5) {
+                } else if (x - 3 < dx*0.5 && x > 3-dx*0.5 && y-3 < dy*0.5 &&  y > 3-dy*0.5) {
                     node.bc_type = 1;
                     node.bc_val = 0.1;
                     node.i = i;
@@ -107,7 +107,7 @@ public:
                     node.x = x;
                     node.y = y;
                     nodes.push_back(node); 
-                }*/
+                }
                 // Если вне треугольника и не на границах
                 else if (!insideTriangle(x, y) && (i!=0 && i!=Ny) && (j!=0 && j!=Nx)) {
                     node.i = i;
