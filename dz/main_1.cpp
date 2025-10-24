@@ -20,9 +20,6 @@ class GaussSolver {
         int res = gauss_check_solutions(mat);
         if (res != 0)
             gauss_backward_elimination(mat);
-        else {
-            std::cout << "SOS! СЛАУ НЕСОВМЕСТНА" << std::endl;
-        }
         return res;
     }
 
@@ -85,7 +82,7 @@ class GaussSolver {
         for (int i = 0; i < mat.size(); i++) {
             bool row_nonzero = false;
             for (int j = 0; j < mat[i].size() - 1; j++) {
-                if (fabs(mat[i][j]) > 1e-12) {  // Пороговое значение для сравнения с нулем
+                if (fabs(mat[i][j]) > 1e-24) {  // Пороговое значение для сравнения с нулем
                     row_nonzero = true;
                     break;
                 }
@@ -111,7 +108,7 @@ class Schema9 {
         const double L = 0.001;
         const double C = 1e-8;
         const double rb = 20.;
-        const double ru = 1000000.;
+        const double ru = 1e6;
         const double Cb = 2e-12; 
         const double It = 1e-12;
         const double R = 1000.;
@@ -123,17 +120,17 @@ class Schema9 {
         
         // Параметры времени расчёта
         const double t_start = 0.;
-        const double t_end = 0.001;
+        const double t_end = 1e-3;
 
         // Гиперпараметры решателя
         const double delta_t_min = 1e-13;
-        const double delta_t_start = 1e-9;
-        const double eps = 1e-2;
-        const double eps1 = 1e-6;
-        const double eps2 = 1;
+        const double delta_t_start = 1e-7;
+        const double eps = 1e-4;        // DLU
+        const double eps2 = 1e-5;       // ACR
+        const double eps1 = eps2 / 1.;   
         const int max_step = 7;
 
-                // ---------- заранее выделяемые (статические для экземпляра) матрицы/векторы ----------
+        // ---------- заранее выделяемые (статические для экземпляра) матрицы/векторы ----------
         // Матрица 6x7 (расширенная матрица) — хранится как vector<vector<double>> для совместимости с GaussSolver
         std::vector<std::vector<double>> augm;
 
@@ -157,7 +154,7 @@ class Schema9 {
             double IL = init_approx[0], IE = init_approx[5];
             double phi1 = init_approx[1]; double phi2 = init_approx[2]; double phi3 = init_approx[3]; double phi4 = init_approx[4]; 
             double alpha = It*(std::exp((phi2-phi3)/mft))/mft; 
-            double Id = It*(std::exp((phi2-phi3)/mft)-1.);
+            double Id = It*(std::exp((phi2-phi3)/mft)-1.); 
             augm[0][0] = -L/deltaT; 
             augm[0][1] = 1.; 
             augm[0][2] = 0.; 
@@ -216,15 +213,14 @@ class Schema9 {
                 }
                 std::cout << ">\n";
             }
-            std::cout << std::fflush;
             */
         
             return;
         }
 
         // Принимает double deltaT, 
-                    // <double IL, double phi1, double phi2, double phi3, double phi4, double IE>, 
-                    // <double IL_nm1, double UC_nm1, UCb_nm1>
+            // <double IL, double phi1, double phi2, double phi3, double phi4, double IE>, 
+            // <double IL_nm1, double UC_nm1, UCb_nm1>
         // Возвращает вектор deltas <IL, phi1, phi2, phi3, phi4, IE>
         bool newton_iteration (double DeltaT, std::vector<double>& init_approx, std::vector<double>& prev_state_variables, std::vector<std::vector<double>>& augm, std::vector<double>& dX) {
             calculate_augmented_matrix(DeltaT, init_approx, prev_state_variables, augm);
@@ -232,21 +228,25 @@ class Schema9 {
             if (rang != augm.size()) {
                 return false;
             }
-            for (size_t i = 0; i < 6; ++i) 
+            for (int i = 0; i < 6; ++i) 
                 dX[i] = augm[i][6];
             return true;
         }
 
         double calculate_norm(std::vector<double>& deltas) {
-            if (deltas.empty()) {
-                return 0.0;
-            }
-            
             double max_abs = std::abs(deltas[0]);
-            for (size_t i = 1; i < deltas.size(); ++i) {
+            for (int i = 1; i < deltas.size(); i++) {
                 max_abs = std::max(max_abs, std::abs(deltas[i]));
             }
             return max_abs;
+        }
+
+        double calculate_norm_phi(std::vector<double>& deltas) {
+            double max_abs = std::abs(deltas[1]);
+            for (int i = 1; i < deltas.size()-1; i++) {
+                max_abs = std::max(max_abs, std::abs(deltas[i]));
+            }
+            return max_abs/40;
         }
 
     bool solve_schema() {
@@ -278,8 +278,15 @@ class Schema9 {
         std::vector<double> Xdtdt(6, 0.0); // используется при расчёте q
 
         while (t < t_end) {
-            std::cout << t << std::endl;
+            //std::cout << "t = " << t << std::endl;
             
+            flog << std::fixed << std::setprecision(12)
+            << count++ << ' '
+            << t      << ' '
+            << X[1]   << ' '
+            << X[3]   << ' '
+            << X[4]   << '\n';
+
             //std::this_thread::sleep_for(std::chrono::milliseconds(1000));
             bool step_accepted = false;
             bool restart_with_smaller_dt = false;
@@ -287,18 +294,29 @@ class Schema9 {
             while (!step_accepted) {
                 // TODO ВАЖНО! при превышлении максимального числа итераций методом Ньютона мы изменяем шаг и следовательно начальное приближение пересчитываем!!!
                 for (size_t i = 0; i < init_approx.size(); ++i) {
-                    init_approx[i] = 2.0 * X_prev[i] - X_prev_prev[i];
+                    init_approx[i] = X[i] + (X[i] - X_prev[i])*dt/dt_prev;
                 }
                 int n_iter = 0;
 
+
+                //std::cout << "Итерация методом Ньютона" << std::endl;
+
                 do {
+                    restart_with_smaller_dt = false;
                     n_iter++;
                     if (!newton_iteration(dt, init_approx, prev_state, augm, dX)) {
-                        std::cerr << "Ошибка во время решения СЛАУ\n";
-                        flog.close();
-                        return false;
+                        dt /= 2.0;
+                        if (dt < delta_t_min) {
+                            std::cerr << "Ошибка: сходимость не достигается (dt < dt_min)\n";
+                            std::cout << "t=" << t << std::endl << std::fflush;
+                            flog.close();
+                            return false;
+                        }
+                        restart_with_smaller_dt = true;
+                        break; // выход из цикла do...while
                     }
                     //std::cout << "dX=<" << dX[0] << "," << dX[1] << "," << dX[2] << "," << dX[3] << "," << dX[4] << "," << dX[5] << ">" << std::endl << std::fflush;
+                    //std::cout << "dt=" << dt << std::endl;
                     for (size_t i = 0; i < init_approx.size(); i++)
                         init_approx[i] += dX[i];
                     norm_dX = calculate_norm(dX);
@@ -323,44 +341,40 @@ class Schema9 {
                     continue;
                 }
 
+                //std::cout << "init_approx=<" << init_approx[0] << "," << init_approx[1] << "," << init_approx[2] << "," << init_approx[3] << "," << init_approx[4] << "," << init_approx[5] << ">" << std::endl;
                 for (size_t i = 0; i < X.size(); i++) {
-                    Xdtdt[i] = ((init_approx[i]-X_prev[i])/dt-(X_prev[i]-X_prev_prev[i])/dt_prev)/dt;
+                    Xdtdt[i] = ((init_approx[i]-X[i])/dt-(X[i]-X_prev[i])/dt_prev);
                 }
 
-                double q = 0.5*dt*calculate_norm(Xdtdt)*dt;
-                std::cout << "dt=" << dt << std::endl;
-                std::cout << "q=" << q << std::endl;
-
-                // === Адаптивное изменение шага ===
+                double q = 0.5*dt*calculate_norm_phi(Xdtdt); // (домножил на dt сразу при расчёте производноы)
+                //std::cout << "dt=" << dt << std::endl;
+                //std::cout << "q=" << q << std::endl;
                 if (q < eps1) { 
-                    //std::cout << "eps1" << std::endl << std::fflush;
+                    //std::cout << "<eps1" << std::endl;
                     t_prev = t;
                     t += dt;
                     dt_prev = dt;
                     dt *= 2.0;
                 } else {
                     if (q < eps2) {
-                        //std::cout << "sigma2" << std::endl << std::fflush;
+                        //std::cout << "eps1< <eps2" << std::endl;
                         t_prev = t;
                         t += dt;
                         dt_prev = dt;
                         dt = dt;
                     }
                     else {
-                        // TODO?????? КОСТЫЛЬ
+                        //std::cout << ">eps2" << std::endl;
+                        if (count > 3) {
+                            dt /= 2;
+                            continue;
+                        }
+                        else {
                             t_prev = t;
                             t += dt;
                             dt_prev = dt;
-                            dt = dt;
-                        /*
-                        dt /= 2;
-                        if (dt < delta_t_min) {
-                            std::cerr << "Ошибка: сходимость не достигается (dt < dt_min)\n";
-                            std::cout << "t=" << t << std::endl << std::fflush;
-                            flog.close();
-                            return false;
+                            dt = dt;                           
                         }
-                        continue;*/ 
                     }
                 }
 
@@ -376,16 +390,18 @@ class Schema9 {
                 prev_state[1] = X[1]; // UC = phi1
                 prev_state[2] = X[2] - X[3]; // UCb = phi2 - phi3
 
-                flog << std::fixed << std::setprecision(12)
-                << count++ << ' '
-                << t      << ' '
-                << X[1]   << ' '
-                << X[3]   << ' '
-                << X[4]   << '\n';
-
                 step_accepted = true; // выходим из внутреннего while и переходим к следующему временному шагу
             } // конец попыток одного временного шага
         } // конец цикла по времени
+
+        flog << std::fixed << std::setprecision(12)
+            << count++ << ' '
+            << t_end      << ' ' // TODO
+            << X[1]   << ' '
+            << X[3]   << ' '
+            << X[4]   << '\n';
+
+
         flog.close();
         return true;
     }
